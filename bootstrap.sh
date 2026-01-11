@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-for i in .bash_aliases .config/opencode/opencode.jsonc ; do
+for i in .bash_aliases .config/opencode/opencode.jsonc; do
+  mkdir -p "$HOME/$(dirname "$i")"
   cp "$HOME/dotfiles/$i" "$HOME/$i"
 done
 
-OPENCODE_VERSION=1.1.12 # renovate: datasource=github-releases depName=anomalyco/opencode packageName=anomalyco/opencode
+OPENCODE_VERSION=1.1.12      # renovate: datasource=github-releases depName=anomalyco/opencode packageName=anomalyco/opencode
 DEVCONTAINERS_VERSION=0.80.3 # renovate: datasource=github-releases depName=devcontainers/cli packageName=devcontainers/cli
 
 npm install --global opencode-ai@$OPENCODE_VERSION
