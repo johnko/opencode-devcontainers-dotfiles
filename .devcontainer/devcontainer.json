@@ -1,3 +1,5 @@
 {
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:24-trixie"
+  "image": "mcr.microsoft.com/devcontainers/universal:5-noble",
+  "initializeCommand": "docker pull --platform=linux/amd64 mcr.microsoft.com/devcontainers/universal:5-noble",
+  "initializeCommandComment": "This is a workaround for arm64 MacOS devcontainer issue"
 }
