@@ -110,6 +110,26 @@ if type git &>/dev/null; then
     fi
   }
 fi
+allow-git-remote() {
+  if [[ ! -e ~/.allowed_git_remote ]]; then
+    touch ~/.allowed_git_remote
+  fi
+}
+deny-git-remote() {
+  if [[ -e ~/.allowed_git_remote ]]; then
+    rm ~/.allowed_git_remote
+  fi
+}
+allow-git-sign() {
+  if [[ ! -e ~/.allowed_git_sign ]]; then
+    touch ~/.allowed_git_sign
+  fi
+}
+deny-git-sign() {
+  if [[ ! -e ~/.allowed_git_sign ]]; then
+    rm ~/.allowed_git_sign
+  fi
+}
 
 ########################################
 
@@ -215,6 +235,7 @@ gg() {
   # GG_GITHUB_ORG=
   # GG_GITHUB_PROJECT='18'
   GG_GITHUB_LABEL='devops :test_tube:'
+  GG_WORKDIR=~/code/cursor
 
   TMP_LOG=$(mktemp)
   case "$1" in
@@ -275,16 +296,72 @@ gg() {
         gh workflow list >/dev/null 2>&1 || echo "ERROR: Cannot list workflows. Try:    gh auth refresh --scopes workflow"
       fi
       ;;
+    clone)
+      pushd "$GG_WORKDIR" >/dev/null || return
+      LOCAL_REPO="$2"
+      if [[ ! -e $LOCAL_REPO && ! -e "$LOCAL_REPO/.git" ]]; then
+        git clone "git@github.com:$GG_GITHUB_ORG/$LOCAL_REPO.git" "$LOCAL_REPO"
+      fi
+      if [[ -e $LOCAL_REPO && -e "$LOCAL_REPO/.git" ]]; then
+        SAFE_FOLDER=$(echo "$3" | tr -d -C '0-9a-zA-Z_-')
+        SAFE_BRANCH=$(echo "$3" | tr -d -C '0-9a-zA-Z_/-')
+        pushd "$LOCAL_REPO" >/dev/null || return
+        ORIGINAL_REMOTE=$(git remote get-url origin)
+        DEFAULT_BRANCH=master
+        if git branch -a | grep -q 'remotes/origin/main'; then
+          DEFAULT_BRANCH=main
+        fi
+        git fetch origin $DEFAULT_BRANCH &>/dev/null
+        popd &>/dev/null || return
+        if [[ ! -e "$LOCAL_REPO.$SAFE_FOLDER" ]]; then
+          git clone "$LOCAL_REPO" "$LOCAL_REPO.$SAFE_FOLDER"
+        fi
+        pushd "$LOCAL_REPO.$SAFE_FOLDER" >/dev/null || return
+        git remote set-url origin "$ORIGINAL_REMOTE"
+        git remote get-url origin
+        git fetch origin $DEFAULT_BRANCH &>/dev/null
+        git checkout "$SAFE_BRANCH" &>/dev/null || git checkout -b "$SAFE_BRANCH" origin/$DEFAULT_BRANCH || git checkout -b "$SAFE_FOLDER" origin/$DEFAULT_BRANCH
+        git branch -D $DEFAULT_BRANCH &>/dev/null
+        if [[ -e ~/.aws/config ]]; then
+          if ! grep -q cursor ~/.aws/config; then
+            echo "ERROR: AWS Profile 'cursor' was not found in ~/.aws/config"
+          else
+            AWS_VAULT_PROMPT=ykman aws-vault export cursor | awk '{print "export "$0}' >~/.aws_temp_credentials_secret
+          fi
+          if [[ -e ~/.aws_temp_credentials_secret ]]; then
+            set +x
+            source ~/.aws_temp_credentials_secret
+          fi
+          if [[ ! -e ~/kubeconfig/cursor.config ]]; then
+            echo "ERROR: kube config was not found at ~/kubeconfig/cursor.config"
+          else
+            mkdir -p ~/.kube
+            cp ~/kubeconfig/cursor.config ~/.kube/config
+          fi
+        fi
+        if [[ -z $CODE_EDITOR ]]; then
+          OPEN_EDITOR=code
+        else
+          OPEN_EDITOR=$CODE_EDITOR
+        fi
+        echo "Opening $OPEN_EDITOR"
+        $OPEN_EDITOR .
+      fi
+      ;;
     *)
       cat <<EOF
 Usage:
   $0 pr                  Push with 'git' and open PR with 'gh' from current HEAD branch
   $0 label github_url    Tags PR/Issue with my label, milestone and add to GH Project
   $0 clean               Deletes current branch, checkout main/master branch and pull
+  $0 clone local branch  Clones from local and creates branch
 EOF
       ;;
   esac
 }
+if [[ -e ~/.aws_temp_credentials_secret ]]; then
+  source ~/.aws_temp_credentials_secret
+fi
 
 ########################################
 # k8s/helm aliases
@@ -369,8 +446,13 @@ nosleep() {
   export NO_SLEEP_VIDEO_FILE
   envsubst <~/.nosleep/video.html.example >~/.nosleep/video.html
   envsubst <~/.nosleep/clock.html.example >~/.nosleep/clock.html
-  # open -a "Brave Browser" ~/.nosleep/video.html
-  open -a "Brave Browser" ~/.nosleep/clock.html
+  if ls -1 /Applications | grep -q -i brave; then
+    BROWSER_APP="Brave Browser"
+  else
+    BROWSER_APP="Safari"
+  fi
+  # open -a "$BROWSER_APP" ~/.nosleep/video.html
+  open -a "$BROWSER_APP" ~/.nosleep/clock.html
 }
 
 ########################################
@@ -404,7 +486,7 @@ repos-fetchorigin() {
     fi
   done
 }
-repos-gitbranches() {
+repos-branches() {
   # shellcheck disable=SC2044
   for i in $(find . -mindepth 1 -maxdepth 1 -type d); do
     if [[ -e "${i}/.git" ]]; then
@@ -464,7 +546,7 @@ repos-tmptmp() {
 repos-updatemaster() {
   TMP_BRANCH=tmp/tmp$(date +%s)
   # shellcheck disable=SC2044
-  for i in $(find . -mindepth 1 -maxdepth 1 -type d); do
+  for i in $(find . -mindepth 1 -maxdepth 1 -type d -not -name '*.*'); do
     if [[ -e "${i}/.git" ]]; then
       pushd "${i}" >/dev/null || return
       echo "==> ${__YELLOW}${i}${__RESET}"
@@ -518,3 +600,13 @@ v-psa() {
 v-ssh() {
   vagrant ssh "${@}"
 }
+
+########################################
+
+if [[ ! -e "$HOME/.allowed_git_remote" ]]; then
+  export SSH_AUTH_SOCK=""
+fi
+# add $HOME/bin for custom scripts early in PATH
+if [[ -e "$HOME/bin" ]]; then
+  export PATH="$HOME/bin:$PATH"
+fi
